@@ -1,8 +1,4 @@
 # ============================================================
-#
-#   DEUTSCHE BAHN PERFORMANCE DASHBOARD
-#
-# ============================================================
 
 import streamlit as st
 import duckdb
@@ -18,29 +14,70 @@ st.set_page_config(
     layout="wide"
 )
 
-# data path
-DATA_PATH = "./data/deutsche_bahn_data/monthly_processed_data/data-2024-10.parquet"
+# ============================================================
+# TITEL & DATA SELECTION
+# ============================================================
 
-# DuckDB Connection wit streamlit integration
+st.title("🚆 Deutsche Bahn Performance Dashboard")
+
+# Year and Month selection
+col1, col2 = st.columns([1, 3])
+
+with col1:
+    selected_year = st.selectbox(
+        "Select Year:",
+        options=[2024, 2023, 2022],  # Add more years as they become available
+        index=0  # Default to 2024
+    )
+
+with col2:
+    selected_month = st.selectbox(
+        "Select Month:",
+        options=[
+            ("January", 1), ("February", 2), ("March", 3), ("April", 4),
+            ("May", 5), ("June", 6), ("July", 7), ("August", 8),
+            ("September", 9), ("October", 10), ("November", 11), ("December", 12)
+        ],
+        format_func=lambda x: x[0],  # Display month name
+        index=9  # Default to October (index 9)
+    )
+
+# Construct data path based on selection
+month_num = selected_month[1]
+DATA_PATH = f"https://huggingface.co/datasets/piebro/deutsche-bahn-data/resolve/main/monthly_processed_data/data-{selected_year}-{month_num:02d}.parquet"
+
+st.markdown(f"**Data source:** {selected_month[0]} {selected_year} | ~2 million train services")
+st.markdown("---")
+
+
+# ============================================================
+# DUCKDB CONNECTION
+# ============================================================
+
+# DuckDB Connection with streamlit integration
 @st.cache_resource
 def get_connection():
     con = duckdb.connect()
-    # Create a named view pointing at the parquet file
+    # Install and load HTTPFS extension for reading from URLs
+    con.execute("INSTALL httpfs")
+    con.execute("LOAD httpfs")
+    return con
+
+
+con = get_connection()
+
+# Create view based on selected data
+# Note: We recreate the view each time the selection changes
+try:
     con.execute(f"""
         CREATE OR REPLACE VIEW data_table AS
         SELECT * FROM read_parquet('{DATA_PATH}')
     """)
-    return con
-
-con = get_connection()
-
-# ============================================================
-# TITEL
-# ============================================================
-
-st.title("🚆 Deutsche Bahn Performance Dashboard")
-st.markdown("**Data source:** October 2024 | ~2 million train services")
-st.markdown("---")
+except Exception as e:
+    st.error(f"❌ Could not load data for {selected_month[0]} {selected_year}")
+    st.error(f"Error: {e}")
+    st.info("This dataset may not be available yet. Please try a different month/year combination.")
+    st.stop()
 
 # ============================================================
 # TEST: Daten laden
