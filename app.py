@@ -95,7 +95,7 @@ except Exception as e:
 # ============================================================
 
 @st.cache_data
-def get_kpis():
+def get_kpis(_year, _month):
     """Calculate Main KPIs"""
     result = con.execute("""
         SELECT
@@ -118,7 +118,7 @@ def get_kpis():
         'end_date': result[5]
     }
 
-kpis = get_kpis()
+kpis = get_kpis(selected_year, month_num)
 
 # ============================================================
 # KPI CARDS ANZEIGEN
@@ -160,7 +160,7 @@ st.markdown("---")
 # ============================================================
 
 @st.cache_data
-def get_rush_hour_stats():
+def get_rush_hour_stats(_year, _month):
     """Vergleicht Rush Hour mit normalen Zeiten"""
     result = con.execute(f"""
     SELECT
@@ -168,12 +168,12 @@ def get_rush_hour_stats():
             WHEN HOUR(time) BETWEEN 7 AND 9 THEN 'Morning Rush (7-9)'
             WHEN HOUR(time) BETWEEN 16 AND 19 THEN 'Evening Rush (16-19)'
             ELSE 'Normal'
-        END as zeitfenster,
-        COUNT(*) as fahrten,
+        END as time_window,
+        COUNT(*) as total_trips,
         ROUND(AVG(delay_in_min), 2) as avg_delay,
-        ROUND(SUM(CASE WHEN delay_in_min > 15 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as verspaetet_pct,
+        ROUND(SUM(CASE WHEN delay_in_min > 15 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as delayed_pct,
         ROUND(SUM(CASE WHEN is_canceled THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as canceled_pct
-    FROM '{DATA_PATH}'
+    FROM data_table
     WHERE delay_in_min IS NOT NULL
     GROUP BY 1
     ORDER BY avg_delay DESC
@@ -181,7 +181,7 @@ def get_rush_hour_stats():
 
     return result
 
-rush_hour_df = get_rush_hour_stats()
+rush_hour_df = get_rush_hour_stats(selected_year, month_num)
 
 st.subheader("🕐 Rush Hour Analysis")
 
@@ -190,7 +190,7 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("**Average delay by Time of Day**")
     st.bar_chart(
-        rush_hour_df.set_index('zeitfenster')['avg_delay'],
+        rush_hour_df.set_index('time_window')['avg_delay'],
         color='#FF6B6B'
     )
 
@@ -203,7 +203,7 @@ with col2:
     )
 
 # Business Insight Box
-worst_time = rush_hour_df.iloc[0]['zeitfenster']
+worst_time = rush_hour_df.iloc[0]['time_window']
 worst_delay = rush_hour_df.iloc[0]['avg_delay']
 
 st.info(f"""
@@ -218,7 +218,7 @@ st.markdown("---")
 # ============================================================
 
 @st.cache_data
-def get_weekday_stats():
+def get_weekday_stats(_year, _month):
     """Analysiert Verspätungen nach Wochentag"""
     result = con.execute(f"""
     SELECT
@@ -244,7 +244,7 @@ def get_weekday_stats():
 
     return result
 
-weekday_df = get_weekday_stats()
+weekday_df = get_weekday_stats(selected_year, month_num)
 
 # 4.2 Show Weekday charts
 
@@ -281,7 +281,7 @@ st.markdown("---")
 # ============================================================
 
 @st.cache_data
-def get_train_types():
+def get_train_types(_year, _month):
 
     """get all available train names"""
     result = con.execute(f"""
@@ -295,7 +295,7 @@ def get_train_types():
     return result['train_type'].tolist()
 
 @st.cache_data
-def get_train_type_stats(selected_types):
+def get_train_type_stats(selected_types, _year, _month):
     """Analyzes Performance according to train type"""
     # Converts list to SQL IN clause
     types_str = ", ".join([f"'{t}'" for t in selected_types])
@@ -321,7 +321,7 @@ def get_train_type_stats(selected_types):
 st.subheader("🚄 Train type comparison")
 
 # Get train types
-all_train_types = get_train_types()
+all_train_types = get_train_types(selected_year, month_num)
 
 # Create filters
 selected_types = st.multiselect(
@@ -332,7 +332,7 @@ selected_types = st.multiselect(
 
 # Only show if at least one type was selected
 if selected_types:
-    train_type_df = get_train_type_stats(selected_types)
+    train_type_df = get_train_type_stats(selected_types, selected_year, month_num)
 
     col1, col2 = st.columns(2)
 
@@ -361,6 +361,8 @@ else:
     st.warning("⚠️ Please select at least one train type.")
 
 st.markdown("---")
+
+
 
 # Footer
 
