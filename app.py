@@ -4,6 +4,7 @@ import streamlit as st
 import duckdb
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 # ============================================================
 # Configurations
@@ -27,8 +28,8 @@ col1, col2 = st.columns([1, 3])
 with col1:
     selected_year = st.selectbox(
         "Select Year:",
-        options=[2024, 2023, 2022],  # Add more years as they become available
-        index=0  # Default to 2024
+        options=[2024, 2023, 2022],
+        index=0
     )
 
 with col2:
@@ -39,8 +40,8 @@ with col2:
             ("May", 5), ("June", 6), ("July", 7), ("August", 8),
             ("September", 9), ("October", 10), ("November", 11), ("December", 12)
         ],
-        format_func=lambda x: x[0],  # Display month name
-        index=9  # Default to October (index 9)
+        format_func=lambda x: x[0],
+        index=9
     )
 
 # Construct data path based on selection
@@ -55,11 +56,9 @@ st.markdown("---")
 # DUCKDB CONNECTION
 # ============================================================
 
-# DuckDB Connection with streamlit integration
 @st.cache_resource
 def get_connection():
     con = duckdb.connect()
-    # Install and load HTTPFS extension for reading from URLs
     con.execute("INSTALL httpfs")
     con.execute("LOAD httpfs")
     return con
@@ -68,7 +67,6 @@ def get_connection():
 con = get_connection()
 
 # Create view based on selected data
-# Note: We recreate the view each time the selection changes
 try:
     con.execute(f"""
         CREATE OR REPLACE VIEW data_table AS
@@ -91,6 +89,7 @@ except Exception as e:
     st.error(f"❌ Error while loading: {e}")
     st.stop()
 
+
 # ============================================================
 # KPI BERECHNUNG
 # ============================================================
@@ -99,16 +98,17 @@ except Exception as e:
 def get_kpis(_year, _month):
     """Calculate Main KPIs"""
     result = con.execute("""
-        SELECT
-            COUNT(*) AS total_trips,
-            ROUND(AVG(delay_in_min), 2) AS avg_delay,
-            ROUND(SUM(CASE WHEN delay_in_min <= 5 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS punctuality_pct,
-            ROUND(SUM(CASE WHEN is_canceled THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS canceled_pct,
-            MIN(time) AS start_date,
-            MAX(time) AS end_date
-        FROM data_table
-        WHERE delay_in_min IS NOT NULL
-    """).fetchone()
+                         SELECT COUNT(*)                                                                        AS total_trips,
+                                ROUND(AVG(delay_in_min), 2)                                                     AS avg_delay,
+                                ROUND(SUM(CASE WHEN delay_in_min <= 5 THEN 1 ELSE 0 END) * 100.0 / COUNT(*),
+                                      1)                                                                        AS punctuality_pct,
+                                ROUND(SUM(CASE WHEN is_canceled THEN 1 ELSE 0 END) * 100.0 / COUNT(*),
+                                      2)                                                                        AS canceled_pct,
+                                MIN(time)                                                                       AS start_date,
+                                MAX(time)                                                                       AS end_date
+                         FROM data_table
+                         WHERE delay_in_min IS NOT NULL
+                         """).fetchone()
 
     return {
         'total_trips': result[0],
@@ -119,6 +119,7 @@ def get_kpis(_year, _month):
         'end_date': result[5]
     }
 
+
 kpis = get_kpis(selected_year, month_num)
 
 # ============================================================
@@ -127,7 +128,6 @@ kpis = get_kpis(selected_year, month_num)
 
 st.subheader("📊 Key Performance Indicators")
 
-# 4 columns for KPIs
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
@@ -156,6 +156,7 @@ with col4:
 
 st.markdown("---")
 
+
 # ============================================================
 # RUSH HOUR ANALYSE
 # ============================================================
@@ -163,13 +164,13 @@ st.markdown("---")
 @st.cache_data
 def get_rush_hour_stats(_year, _month):
     """Vergleicht Rush Hour mit normalen Zeiten"""
-    result = con.execute(f"""
-    SELECT
-        CASE
-            WHEN HOUR(time) BETWEEN 7 AND 9 THEN 'Morning Rush (7-9)'
-            WHEN HOUR(time) BETWEEN 16 AND 19 THEN 'Evening Rush (16-19)'
-            ELSE 'Normal'
-        END as time_window,
+    result = con.execute("""
+                         SELECT CASE
+                                    WHEN HOUR (time) BETWEEN 7 AND 9 THEN 'Morning Rush (7-9)'
+                             WHEN HOUR (time) BETWEEN 16 AND 19 THEN 'Evening Rush (16-19)'
+                             ELSE 'Normal'
+                         END
+                         as time_window,
         COUNT(*) as total_trips,
         ROUND(AVG(delay_in_min), 2) as avg_delay,
         ROUND(SUM(CASE WHEN delay_in_min > 15 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as delayed_pct,
@@ -178,9 +179,10 @@ def get_rush_hour_stats(_year, _month):
     WHERE delay_in_min IS NOT NULL
     GROUP BY 1
     ORDER BY avg_delay DESC
-    """).fetchdf()
+                         """).fetchdf()
 
     return result
+
 
 rush_hour_df = get_rush_hour_stats(selected_year, month_num)
 
@@ -190,10 +192,27 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("**Average delay by Time of Day**")
-    st.bar_chart(
-        rush_hour_df.set_index('time_window')['avg_delay'],
-        color='#FF6B6B'
+
+    fig = go.Figure(data=[
+        go.Bar(
+            x=rush_hour_df['time_window'],
+            y=rush_hour_df['avg_delay'],
+            text=rush_hour_df['avg_delay'],
+            texttemplate='%{text:.2f} min',
+            textposition='outside',
+            marker_color='#FF6B6B'
+        )
+    ])
+
+    fig.update_layout(
+        height=350,
+        xaxis_tickangle=-45,
+        xaxis_title="Time Window",
+        yaxis_title="Average Delay (min)",
+        showlegend=False
     )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 with col2:
     st.markdown("**Detailed statistics**")
@@ -214,6 +233,7 @@ Recommendation: Plan additional capacities for the respective time window.
 """)
 st.markdown("---")
 
+
 # ============================================================
 # WOCHENTAG ANALYSE
 # ============================================================
@@ -221,49 +241,84 @@ st.markdown("---")
 @st.cache_data
 def get_weekday_stats(_year, _month):
     """Analysiert Verspätungen nach Wochentag"""
-    result = con.execute(f"""
-    SELECT
-        CASE DAYOFWEEK(time)
-            WHEN 0 THEN 'Sunday'
-            WHEN 1 THEN 'Monday'
-            WHEN 2 THEN 'Tuesday'
-            WHEN 3 THEN 'Wednesday'
-            WHEN 4 THEN 'Thursday'
-            WHEN 5 THEN 'Friday'
-            WHEN 6 THEN 'Saturday'
-            ELSE 'Unknown'
-        END as weekday,
-        DAYOFWEEK(time) as day_number,
-        COUNT(*) as total_trips,
-        ROUND(AVG(delay_in_min), 2) as avg_delay,
-        ROUND(SUM(CASE WHEN is_canceled THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as canceled_pct
-    FROM data_table
-    WHERE delay_in_min IS NOT NULL
-    GROUP BY DAYOFWEEK(time)
-    ORDER BY DAYOFWEEK(time)
-    """).fetchdf()
+    result = con.execute("""
+                         SELECT CASE DAYOFWEEK(time)
+                                    WHEN 0 THEN 'Sunday'
+                                    WHEN 1 THEN 'Monday'
+                                    WHEN 2 THEN 'Tuesday'
+                                    WHEN 3 THEN 'Wednesday'
+                                    WHEN 4 THEN 'Thursday'
+                                    WHEN 5 THEN 'Friday'
+                                    WHEN 6 THEN 'Saturday'
+                                    ELSE 'Unknown'
+                                    END                                                                   as weekday,
+                                DAYOFWEEK(time)                                                           as day_number,
+                                COUNT(*)                                                                  as total_trips,
+                                ROUND(AVG(delay_in_min), 2)                                               as avg_delay,
+                                ROUND(SUM(CASE WHEN is_canceled THEN 1 ELSE 0 END) * 100.0 / COUNT(*),
+                                      2)                                                                  as canceled_pct
+                         FROM data_table
+                         WHERE delay_in_min IS NOT NULL
+                         GROUP BY DAYOFWEEK(time)
+                         ORDER BY DAYOFWEEK(time)
+                         """).fetchdf()
 
     return result
 
+
 weekday_df = get_weekday_stats(selected_year, month_num)
 
-# 4.2 Show Weekday charts
+st.subheader("📅 Weekday Analysis")
 
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("**Delays by Day of the Week**")
-    st.bar_chart(
-        weekday_df.set_index('weekday')['avg_delay'],
-        color='#4ECDC4'
+
+    fig = go.Figure(data=[
+        go.Bar(
+            x=weekday_df['weekday'],
+            y=weekday_df['avg_delay'],
+            text=weekday_df['avg_delay'],
+            texttemplate='%{text:.2f} min',
+            textposition='outside',
+            marker_color='#4ECDC4'
+        )
+    ])
+
+    fig.update_layout(
+        height=350,
+        xaxis_tickangle=-45,
+        xaxis_title="Day of Week",
+        yaxis_title="Average Delay (min)",
+        showlegend=False
     )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 with col2:
     st.markdown("**Cancellations by Day of the Week**")
-    st.bar_chart(
-        weekday_df.set_index('weekday')['canceled_pct'],
-        color='#FFE66D'
+
+    fig = go.Figure(data=[
+        go.Bar(
+            x=weekday_df['weekday'],
+            y=weekday_df['canceled_pct'],
+            text=weekday_df['canceled_pct'],
+            texttemplate='%{text:.2f}%',
+            textposition='outside',
+            marker_color='#FFE66D'
+        )
+    ])
+
+    fig.update_layout(
+        height=350,
+        xaxis_tickangle=-45,
+        xaxis_title="Day of Week",
+        yaxis_title="Cancellation Rate (%)",
+        showlegend=False
     )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 # Best and worst day
 best_day = weekday_df.loc[weekday_df['avg_delay'].idxmin()]
@@ -277,12 +332,13 @@ with col2:
 
 st.markdown("---")
 
+
 # ============================================================
 # DELAY DISTRIBUTION ANALYSIS
 # ============================================================
 
 @st.cache_data
-def get_delay_distribution():
+def get_delay_distribution(_year, _month):
     """Analyzes delay distribution across different buckets"""
     result = con.execute("""
                          SELECT CASE
@@ -306,43 +362,33 @@ def get_delay_distribution():
 
     return result
 
+
 st.subheader("📊 Delay Distribution Analysis")
 
-delay_dist_df = get_delay_distribution()
+delay_dist_df = get_delay_distribution(selected_year, month_num)
 
 col1, col2 = st.columns([2, 1])
 
 with col1:
     st.markdown("**How are delays distributed?**")
 
-    # Create a more polished bar chart
-    import plotly.express as px
-
-    fig = px.bar(
-        delay_dist_df,
-        x='delay_bucket',
-        y='trip_count',
-        text='percentage',
-        color='percentage',
-        color_continuous_scale='RdYlGn_r',  # Red for high delays, green for low
-        labels={
-            'delay_bucket': 'Delay Category',
-            'trip_count': 'Number of Trips',
-            'percentage': 'Percentage (%)'
-        }
-    )
-
-    # Customize the chart
-    fig.update_traces(
-        texttemplate='%{text:.1f}%',
-        textposition='outside'
-    )
+    fig = go.Figure(data=[
+        go.Bar(
+            x=delay_dist_df['delay_bucket'],
+            y=delay_dist_df['trip_count'],
+            text=delay_dist_df['percentage'],
+            texttemplate='%{text:.1f}%',
+            textposition='outside',
+            marker_color='#3498DB'  # Nice blue color
+        )
+    ])
 
     fig.update_layout(
-        showlegend=False,
         height=400,
+        xaxis_tickangle=-45,
+        xaxis_title="Delay Category",
         yaxis_title="Number of Trips",
-        xaxis_title="Delay Category"
+        showlegend=False
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -380,28 +426,27 @@ st.info(f"""
 
 st.markdown("---")
 
+
 # ============================================================
 # ZUGTYP ANALYSE MIT FILTER
 # ============================================================
 
 @st.cache_data
 def get_train_types(_year, _month):
-
     """get all available train names"""
-    result = con.execute(f"""
-        SELECT 
-            DISTINCT train_type
-        FROM data_table
-        WHERE train_type IS NOT NULL
-        ORDER BY train_type
-    """).fetchdf()
+    result = con.execute("""
+                         SELECT DISTINCT train_type
+                         FROM data_table
+                         WHERE train_type IS NOT NULL
+                         ORDER BY train_type
+                         """).fetchdf()
 
     return result['train_type'].tolist()
+
 
 @st.cache_data
 def get_train_type_stats(selected_types, _year, _month):
     """Analyzes Performance according to train type"""
-    # Converts list to SQL IN clause
     types_str = ", ".join([f"'{t}'" for t in selected_types])
 
     result = con.execute(f"""
@@ -420,7 +465,6 @@ def get_train_type_stats(selected_types, _year, _month):
 
     return result
 
-# 5.2 Filter and show chart
 
 st.subheader("🚄 Train type comparison")
 
@@ -431,7 +475,7 @@ all_train_types = get_train_types(selected_year, month_num)
 selected_types = st.multiselect(
     "Choose train types to compare:",
     options=all_train_types,
-    default=['ICE', 'IC', 'RE', 'RB', 'S']  # Standard-Choice
+    default=['ICE', 'IC', 'RE', 'RB', 'S']
 )
 
 # Only show if at least one type was selected
@@ -442,17 +486,51 @@ if selected_types:
 
     with col1:
         st.markdown("**Average delays**")
-        st.bar_chart(
-            train_type_df.set_index('train_type')['avg_delay'],
-            color='#9B59B6'
+
+        fig = go.Figure(data=[
+            go.Bar(
+                x=train_type_df['train_type'],
+                y=train_type_df['avg_delay'],
+                text=train_type_df['avg_delay'],
+                texttemplate='%{text:.2f} min',
+                textposition='outside',
+                marker_color='#9B59B6'
+            )
+        ])
+
+        fig.update_layout(
+            height=350,
+            xaxis_tickangle=-45,
+            xaxis_title="Train Type",
+            yaxis_title="Average Delay (min)",
+            showlegend=False
         )
+
+        st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         st.markdown("**Punctuality Rate**")
-        st.bar_chart(
-            train_type_df.set_index('train_type')['punctuality_pct'],
-            color='#2ECC71'
+
+        fig = go.Figure(data=[
+            go.Bar(
+                x=train_type_df['train_type'],
+                y=train_type_df['punctuality_pct'],
+                text=train_type_df['punctuality_pct'],
+                texttemplate='%{text:.1f}%',
+                textposition='outside',
+                marker_color='#2ECC71'
+            )
+        ])
+
+        fig.update_layout(
+            height=350,
+            xaxis_tickangle=-45,
+            xaxis_title="Train Type",
+            yaxis_title="Punctuality (%)",
+            showlegend=False
         )
+
+        st.plotly_chart(fig, use_container_width=True)
 
     # Detaillierte Tabelle
     st.markdown("**Detailed Statistics:**")
@@ -466,20 +544,20 @@ else:
 
 st.markdown("---")
 
-
-
-# Footer
+# ============================================================
+# FOOTER
+# ============================================================
 
 st.markdown("""
-### 📝 About this Dashboard
+### 📄 About this Dashboard
 
-**Data source:** Deutsche Bahn API via HuggingFace
-**Creation date:** October 2024
+**Data source:** Deutsche Bahn API via HuggingFace  
+**Creation date:** October 2024  
 **Data volume:** ~2 million train services  
 
-**Created by:** Dennis Feyerabend
-**Date:** December 2025
-**Technologies used:** Python, DuckDB, Streamlit, Railway
+**Created by:** Dennis Feyerabend  
+**Date:** December 2025  
+**Technologies used:** Python, DuckDB, Streamlit, Plotly, Railway
 
 ---
 
@@ -487,5 +565,5 @@ st.markdown("""
 """)
 
 with st.expander("🔍 Show raw data"):
-    sample = con.execute(f"SELECT * FROM data_table LIMIT 100").fetchdf()
+    sample = con.execute("SELECT * FROM data_table LIMIT 100").fetchdf()
     st.dataframe(sample)
