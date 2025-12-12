@@ -3,6 +3,7 @@
 import streamlit as st
 import duckdb
 import pandas as pd
+import plotly.express as px
 
 # ============================================================
 # Configurations
@@ -273,6 +274,109 @@ with col1:
     st.success(f"✅ **Best day:** {best_day['weekday']} ({best_day['avg_delay']} min)")
 with col2:
     st.error(f"❌ **Worst day:** {worst_day['weekday']} ({worst_day['avg_delay']} min)")
+
+st.markdown("---")
+
+# ============================================================
+# DELAY DISTRIBUTION ANALYSIS
+# ============================================================
+
+@st.cache_data
+def get_delay_distribution():
+    """Analyzes delay distribution across different buckets"""
+    result = con.execute("""
+                         SELECT CASE
+                                    WHEN delay_in_min <= 0 THEN '0. Early/On-Time'
+                                    WHEN delay_in_min <= 5 THEN '1. 1-5 min'
+                                    WHEN delay_in_min <= 15 THEN '2. 6-15 min'
+                                    WHEN delay_in_min <= 30 THEN '3. 16-30 min'
+                                    WHEN delay_in_min <= 60 THEN '4. 31-60 min'
+                                    ELSE '5. 60+ min'
+                                    END                                            as delay_bucket,
+                                COUNT(*)                                           as trip_count,
+                                ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) as percentage
+                         FROM data_table
+                         WHERE delay_in_min IS NOT NULL
+                         GROUP BY 1
+                         ORDER BY 1
+                         """).fetchdf()
+
+    # Clean up the labels (remove the ordering prefix)
+    result['delay_bucket'] = result['delay_bucket'].str.replace(r'^\d+\.\s*', '', regex=True)
+
+    return result
+
+st.subheader("📊 Delay Distribution Analysis")
+
+delay_dist_df = get_delay_distribution()
+
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.markdown("**How are delays distributed?**")
+
+    # Create a more polished bar chart
+    import plotly.express as px
+
+    fig = px.bar(
+        delay_dist_df,
+        x='delay_bucket',
+        y='trip_count',
+        text='percentage',
+        color='percentage',
+        color_continuous_scale='RdYlGn_r',  # Red for high delays, green for low
+        labels={
+            'delay_bucket': 'Delay Category',
+            'trip_count': 'Number of Trips',
+            'percentage': 'Percentage (%)'
+        }
+    )
+
+    # Customize the chart
+    fig.update_traces(
+        texttemplate='%{text:.1f}%',
+        textposition='outside'
+    )
+
+    fig.update_layout(
+        showlegend=False,
+        height=400,
+        yaxis_title="Number of Trips",
+        xaxis_title="Delay Category"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+with col2:
+    st.markdown("**Distribution Summary**")
+    st.dataframe(
+        delay_dist_df,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "delay_bucket": "Delay Range",
+            "trip_count": st.column_config.NumberColumn(
+                "Trips",
+                format="%d"
+            ),
+            "percentage": st.column_config.NumberColumn(
+                "Share",
+                format="%.1f%%"
+            )
+        }
+    )
+
+# Business Insights
+on_time_pct = delay_dist_df[delay_dist_df['delay_bucket'].isin(['Early/On-Time', '1-5 min'])]['percentage'].sum()
+severe_delay_pct = delay_dist_df[delay_dist_df['delay_bucket'].isin(['31-60 min', '60+ min'])]['percentage'].sum()
+
+st.info(f"""
+**💡 Business Insights:**
+- **{on_time_pct:.1f}%** of trains are on-time or have minimal delays (≤5 min)
+- **{severe_delay_pct:.1f}%** experience severe delays (>30 min)
+- The distribution shows a **long tail** - while most trains run smoothly, a small percentage with severe delays disproportionately impacts customer satisfaction
+- **Recommendation:** Focus improvement efforts on the {severe_delay_pct:.1f}% severe delay cases for maximum customer impact
+""")
 
 st.markdown("---")
 
